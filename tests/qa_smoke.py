@@ -482,7 +482,7 @@ try:
     pdf_samples = ["9.pdf", "10.pdf", "10.1.pdf", "100.pdf"]
     for name in pdf_samples:
         with open(os.path.join(pdf_root, name), "wb") as stream:
-            stream.write(b"%PDF-1.4\\nQA fixture\\n")
+            stream.write(b"%PDF-1.4\nQA fixture\n")
     _, linker_page, _ = get(opener, base, "/pdf-linker")
     assert_true("ربط ملفات PDF" in linker_page and "لا يقرأ محتوى PDF" in linker_page,
                 "PDF linker page missing or incorrectly describes filename-only matching")
