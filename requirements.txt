@@ -1,0 +1,2 @@
+# Digital Archive Pro has no third-party Python dependencies.
+# Runtime uses only the Python standard library.
