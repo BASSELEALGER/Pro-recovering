@@ -1147,7 +1147,9 @@ class H(BaseHTTPRequestHandler):
 <p class="fixed-signature" dir="ltr">© Noureddine 2026</p></div>'''
             self.sendhtml(base('حول البرنامج',about_content,'about',err,ok,uid)); return
         if path=='/pdf-linker':
-            self.redir('/settings?info='+urllib.parse.quote('تم إزالة أداة الربط المنفصلة ودمج الربط التلقائي الآمن بالكامل ضمن التحديث الذكي للأرشيف.')); return
+            if not self.admin(u):
+                self.redir('/?error='+urllib.parse.quote('أداة ربط ملفات PDF متاحة للمدير فقط.')); return
+            self.pdf_linker_page(uid,err,ok); return
         if path=='/storage/migrate-preview':
             if not self.admin(u):
                 self.redir('/settings?error='+urllib.parse.quote('تنظيم المرفقات متاح للمدير فقط.')); return
@@ -1740,6 +1742,30 @@ class H(BaseHTTPRequestHandler):
 
     
 
+    def pdf_linker_page(self,uid,err='',ok=''):
+        c=db()
+        rows=c.execute('''SELECT a.id,a.record_id,a.original_name,a.relative_path,a.size_bytes,
+                          r.direction,r.record_number,r.record_year,r.record_date,r.subject,
+                          u.name AS unit_name,s.name AS storage_name
+                          FROM attachments a JOIN records r ON r.id=a.record_id
+                          LEFT JOIN units u ON u.id=r.unit_id
+                          LEFT JOIN storage_places s ON s.id=u.storage_place_id
+                          WHERE lower(a.original_name) LIKE '%.pdf'
+                          ORDER BY a.id DESC LIMIT 500''').fetchall()
+        c.close()
+        s=settings()
+        tr=[]
+        for r in rows:
+            direction='وارد' if r['direction']=='incoming' else 'صادر'
+            tr.append('<tr><td>'+esc(r['original_name'])+'</td><td>'+direction+'</td><td>'+esc(r['record_number'])+'/'+esc(r['record_year'])+'</td><td>'+esc(r['unit_name'] or '')+'</td><td>'+esc(r['storage_name'] or '')+'</td><td><form method="POST" action="/attachments/unlink_safe" onsubmit="return confirm(\'سيُحذف الربط من قاعدة البيانات فقط، ولن يُحذف ملف PDF أو سجل الأرشيف. متابعة؟\')"><input type="hidden" name="attachment_id" value="'+str(r['id'])+'"><button class="btn btn-sm btn-warning">فك الربط</button></form></td></tr>')
+        table='<table><thead><tr><th>اسم PDF</th><th>الاتجاه</th><th>رقم السجل</th><th>الوحدة</th><th>التخزين</th><th>الإجراء</th></tr></thead><tbody>'+''.join(tr or [])+'</tbody></table>' if tr else '<p class="muted">لا توجد روابط PDF مسجلة حتى الآن.</p>'
+        content=f'''<div class="card"><h2>🔗 ربط ملفات PDF بالمراسلات</h2>
+<p>تتم المطابقة من اسم الملف فقط؛ لا يقرأ البرنامج محتوى PDF ولا يستخدم OCR. راجع النتائج ثم أكد الربط صراحةً. الملفات الأصلية لا تُنقل ولا تُحذف.</p>
+<form method="POST" action="/pdf-linker/match"><div class="form-group"><label>مجلد ملفات PDF المحلي</label><input name="folder_path" class="form-control" dir="ltr" value="{esc(s.get('pdf_linker_folder_path',''))}" placeholder="D:\\ArchivePDF" required></div><button class="btn btn-primary">فحص الأسماء وعرض المعاينة</button></form>
+<p class="muted">المطابقة من اسم الملف فقط، عبر جميع السنوات والوحدات. لا يُقرأ محتوى PDF ولا يُستخدم OCR. تُعرض الحالات الملتبسة دون تخمين. لا يحدث أي ربط نهائي قبل التأكيد الصريح.</p></div>
+<div class="card"><h3>الروابط الحالية</h3>{table}<p class="muted">© Noureddine 2026</p></div>'''
+        self.sendhtml(base('ربط ملفات PDF',content,'pdf-linker',err,ok,uid))
+
     def templates_page(self,uid,f,s,err,ok,q=None):
         self.redir('/settings#templates'); return
 
@@ -1790,6 +1816,9 @@ class H(BaseHTTPRequestHandler):
 <form method="POST" action="/storage/smart-sync" style="display:inline;"><button class="btn btn-primary" onclick="return confirm('تنفيذ التحديث الذكي الآن؟ سيتم استيعاب جميع السنوات والمخازن والوحدات المكتملة وربط ملفات PDF تلقائيًا دون تكرار.');">🔄 تنفيذ التحديث الذكي للأرشيف</button></form>
  <span class="muted" style="margin-right:10px;">يستوعب السنوات والمخازن والوحدات والملفات وينشئ السجلات الناقصة مع منع التكرار.</span>
 </div></div>'''
+                pdf_linker_settings_ui=f'''<div class="card" id="pdf-linker-settings"><h2>🔗 ربط ملفات PDF بالمراسلات</h2>
+<p class="muted">افحص أسماء ملفات PDF واعرض المطابقات عبر السنوات والوحدات قبل إنشاء أي رابط. لا يقرأ البرنامج محتوى الملفات، ولا ينقلها أو يحذفها، ولا يعمل الربط تلقائيًا.</p>
+<a class="btn btn-primary" href="/pdf-linker">فتح أداة ربط PDF ومعاينة المطابقات</a></div>'''
         x_t=db()
         t_rows=x_t.execute('SELECT t.*, u.name as unit_name, s.name as sp_name FROM templates t LEFT JOIN units u ON u.id=t.unit_id LEFT JOIN storage_places s ON s.id=t.storage_place_id ORDER BY t.name').fetchall()
         x_t.close()
@@ -1852,7 +1881,7 @@ class H(BaseHTTPRequestHandler):
 <div class="form-group"><label>كلمة مرور المدير للتأكيد</label><input type="password" name="admin_password" class="form-control" autocomplete="current-password" required></div>
 <label class="check-row"><input type="checkbox" name="confirm_reset" value="1" required> أفهم أن هذا الإجراء سيحذف الأرشيف الرقمي ولا يمكن التراجع عنه من داخل البرنامج.</label>
 <button class="btn btn-danger">حذف الأرشيف بالكامل</button></form></div></div></div></details>'''
-        c=f'''{archive_root_ui}{templates_settings_ui}{login_ui}{reset_ui}<details class="card"><summary style="cursor:pointer;font-weight:bold;font-size:16px;padding:6px 0;">🏛️ إدارة الهيكل التنظيمي (أماكن التخزين والوحدات) — اضغط للفتح</summary><div style="margin-top:14px"><h2>إدارة الهيكل التنظيمي</h2><p.</p><form method="POST" action="/structure/add" class="structure-add"><div class="form-group"><label>نوع العنصر</label><select id="entity_type" name="entity_type" class="form-control" onchange="toggleParent()"><option value="storage">مكان تخزين</option><option value="unit">وحدة</option></select></div><div class="form-group"><label id="name_label">اسم مكان التخزين</label><input name="name" id="name_input" class="form-control" required></div><div class="form-group" id="storage_group" style="display:none"><label>مكان التخزين التابعة له الوحدة</label><select name="storage_place_id" class="form-control"><option value="">اختر مكان التخزين</option>{spopts}</select></div><div class="form-group structure-submit"><button class="btn btn-primary">إضافة</button></div></form><div class="structure-grid"><div><h3>أماكن التخزين</h3><table><tr><th>مكان التخزين</th><th>إجراء</th></tr>{sps_html}</table></div><div><h3>الوحدات</h3><table><tr><th>الوحدة ومكان التخزين التابعة له</th><th>مكان التخزين</th><th>إجراء</th></tr>{units_html}</table></div></div></div><script>function toggleParent(){{const t=document.getElementById('entity_type').value;document.getElementById('storage_group').style.display=t==='unit'?'block':'none';document.getElementById('name_label').textContent=t==='unit'?'اسم الوحدة':'اسم مكان التخزين';}}</script>
+        c=f'''{archive_root_ui}{pdf_linker_settings_ui}{templates_settings_ui}{login_ui}{reset_ui}<details class="card"><summary style="cursor:pointer;font-weight:bold;font-size:16px;padding:6px 0;">🏛️ إدارة الهيكل التنظيمي (أماكن التخزين والوحدات) — اضغط للفتح</summary><div style="margin-top:14px"><h2>إدارة الهيكل التنظيمي</h2><p.</p><form method="POST" action="/structure/add" class="structure-add"><div class="form-group"><label>نوع العنصر</label><select id="entity_type" name="entity_type" class="form-control" onchange="toggleParent()"><option value="storage">مكان تخزين</option><option value="unit">وحدة</option></select></div><div class="form-group"><label id="name_label">اسم مكان التخزين</label><input name="name" id="name_input" class="form-control" required></div><div class="form-group" id="storage_group" style="display:none"><label>مكان التخزين التابعة له الوحدة</label><select name="storage_place_id" class="form-control"><option value="">اختر مكان التخزين</option>{spopts}</select></div><div class="form-group structure-submit"><button class="btn btn-primary">إضافة</button></div></form><div class="structure-grid"><div><h3>أماكن التخزين</h3><table><tr><th>مكان التخزين</th><th>إجراء</th></tr>{sps_html}</table></div><div><h3>الوحدات</h3><table><tr><th>الوحدة ومكان التخزين التابعة له</th><th>مكان التخزين</th><th>إجراء</th></tr>{units_html}</table></div></div></div><script>function toggleParent(){{const t=document.getElementById('entity_type').value;document.getElementById('storage_group').style.display=t==='unit'?'block':'none';document.getElementById('name_label').textContent=t==='unit'?'اسم الوحدة':'اسم مكان التخزين';}}</script>
                 <div class="card"><h2>🛡️ خيارات الحماية والأمان</h2>
 <p class="muted">البرنامج يعمل محلياً بالكامل. يمكنك تفعيل المراقبة المستقلة لوسائط USB والشبكة المحلية والإنترنت لحماية سرية الأرشيف.</p>
 <form method="POST" action="/settings/security">
@@ -2426,8 +2455,119 @@ class H(BaseHTTPRequestHandler):
                 audit(uid,'تحديث ذكي','الأرشيف','',f"years={report.get('years_count',0)}; records={report['created_records']}; linked={report['linked_files']}; already={report['already_linked']}; conflicts={report['conflicts']}")
                 msg=f"تم إكمال التحديث الذكي بنجاح: استيعاب جميع السنوات والمخازن والوحدات المكتملة، إنشاء {report['created_records']} سجل جديد، ربط {report['linked_files']} ملف PDF، مع تجاوز {report['already_linked']} ملف مسجل مسبقًا لمنع التكرار."
                 self.redir('/settings?success='+urllib.parse.quote(msg)); return
-            if path.startswith('/pdf-linker'):
-                self.redir('/settings?info='+urllib.parse.quote('تم إزالة أداة الربط المنفصلة ودمج الربط التلقائي الآمن بالكامل ضمن التحديث الذكي للأرشيف.')); return
+            if path=='/pdf-linker/match':
+                if role!='admin': raise ValueError('ربط ملفات PDF متاح للمدير فقط.')
+                raw=str(form.get('folder_path','')).strip()
+                folder=os.path.abspath(os.path.expanduser(os.path.expandvars(raw)))
+                if not os.path.isdir(folder): raise ValueError('مجلد PDF غير موجود أو غير قابل للوصول.')
+                if os.name=='nt' and folder.startswith(os.sep*2): raise ValueError('اختر مجلدًا محليًا وليس مسار شبكة.')
+                folder_real=os.path.realpath(folder)
+                x.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('pdf_linker_folder_path',?)",(folder_real,))
+                records=x.execute("SELECT r.id,r.direction,r.record_number,r.record_year,r.record_date,r.subject,r.unit_id,u.name AS unit_name,s.name AS storage_name FROM records r LEFT JOIN units u ON u.id=r.unit_id LEFT JOIN storage_places s ON s.id=u.storage_place_id ORDER BY r.id").fetchall()
+                def _norm_pdf_name(value):
+                    value=normalize_digits(str(value or '')).casefold()
+                    return re.sub(r'[\\s_]+','',value)
+                candidates=[]
+                existing_links=x.execute('SELECT id,record_id,relative_path FROM attachments').fetchall()
+                skipped_linked=0
+                file_count=0
+                for walk_root,dirs,files in os.walk(folder_real):
+                    dirs[:]=[d for d in dirs if not d.startswith('.')]
+                    for filename in files:
+                        if not filename.lower().endswith('.pdf'): continue
+                        file_count+=1
+                        if file_count>5000: raise ValueError('تجاوز الفحص 5000 ملف PDF؛ قسّم المجلدات ثم أعد الفحص.')
+                        file_entry=os.path.join(walk_root,filename)
+                        if os.path.islink(file_entry): continue
+                        full=os.path.realpath(file_entry)
+                        if not path_is_within(full,folder_real): continue
+                        stem=_norm_pdf_name(os.path.splitext(filename)[0])
+                        exact=[r for r in records if _norm_pdf_name(r['record_number'])==stem]
+                        found=exact
+                        if not found:
+                            prefix=[r for r in records if stem.startswith(_norm_pdf_name(r['record_number'])+'.') and _norm_pdf_name(r['record_number'])]
+                            if prefix:
+                                longest=max(len(_norm_pdf_name(r['record_number'])) for r in prefix)
+                                found=[r for r in prefix if len(_norm_pdf_name(r['record_number']))==longest]
+                        linked=[a for a in existing_links if os.path.normcase(os.path.realpath(resolve_attachment_path(a['relative_path'])))==os.path.normcase(full)]
+                        if linked:
+                            skipped_linked+=1
+                            continue
+                        if len(found)==1:
+                            r=found[0]
+                            candidates.append({'path':full,'filename':filename,'record_id':int(r['id']),'direction':r['direction'],'number':str(r['record_number']),'year':str(r['record_year']),'unit':str(r['unit_name'] or ''),'storage':str(r['storage_name'] or '')})
+                        elif len(found)>1:
+                            candidates.append({'path':full,'filename':filename,'record_id':0,'direction':'ambiguous','number':'ملتبس','year':'','unit':'، '.join(sorted(set(str(r['unit_name'] or '') for r in found))),'storage':''})
+                x.commit()
+                x.close()
+                payload=json.dumps([z for z in candidates if z['record_id']>0],ensure_ascii=False,separators=(',',':'))
+                table_rows=[]
+                for z in candidates:
+                    if z['record_id']>0:
+                        d='وارد' if z['direction']=='incoming' else 'صادر'
+                        table_rows.append('<tr><td><input type="checkbox" checked disabled></td><td>'+esc(z['filename'])+'</td><td>'+d+'</td><td>'+esc(z['number'])+'/'+esc(z['year'])+'</td><td>'+esc(z['unit'])+'</td></tr>')
+                    else:
+                        table_rows.append('<tr><td>—</td><td>'+esc(z['filename'])+'</td><td colspan="3">ملتبس: '+esc(z['unit'])+' — لم يُربط</td></tr>')
+                content=f'''<div class="card"><h2>معاينة ربط PDF</h2><p>عدد الملفات المفحوصة: {file_count} — مرشحات للربط: {sum(1 for z in candidates if z['record_id']>0)} — حالات ملتبسة: {sum(1 for z in candidates if not z['record_id'])} — ملفات سبق تسجيلها وتجاوزها: {skipped_linked}</p><p>لم يُقرأ محتوى أي PDF. تحقق من كل اسم ورقم ووحدة قبل التأكيد.</p><table><thead><tr><th>اختيار</th><th>اسم الملف</th><th>الاتجاه</th><th>السجل</th><th>الوحدة/الحالة</th></tr></thead><tbody>{''.join(table_rows) or '<tr><td colspan="5">لا توجد ملفات قابلة للربط.</td></tr>'}</tbody></table><form method="POST" action="/pdf-linker/confirm"><input type="hidden" name="folder_path" value="{esc(folder_real)}"><input type="hidden" name="matches_json" value="{esc(payload)}"><button class="btn btn-success" {'disabled' if not any(z['record_id']>0 for z in candidates) else ''} onclick="return confirm('تأكيد إنشاء روابط قاعدة البيانات للنتائج الواضحة فقط؟')">تأكيد الروابط الواضحة</button> <a class="btn" href="/pdf-linker">إلغاء</a></form></div>'''
+                self.sendhtml(base('معاينة ربط PDF',content,'pdf-linker',uid=uid))
+                return
+            if path=='/pdf-linker/confirm':
+                if role!='admin': raise ValueError('ربط ملفات PDF متاح للمدير فقط.')
+                folder=os.path.realpath(str(form.get('folder_path','')).strip())
+                configured=os.path.realpath(str(settings().get('pdf_linker_folder_path','')).strip() or folder)
+                if not os.path.isdir(folder) or folder!=configured: raise ValueError('مسار المجلد تغيّر منذ المعاينة؛ أعد الفحص.')
+                try: items=json.loads(form.get('matches_json','[]'))
+                except Exception: raise ValueError('بيانات المعاينة غير صالحة؛ أعد الفحص.')
+                if not isinstance(items,list) or len(items)>5000: raise ValueError('قائمة الروابط غير صالحة.')
+                all_number_rows=x.execute("SELECT id,record_number FROM records").fetchall()
+                def _norm_confirm(value):
+                    value=normalize_digits(str(value or '')).casefold()
+                    return re.sub(r'[\\s_]+','',value)
+                created=0; conflicts=0
+                for item in items:
+                    if not isinstance(item,dict): continue
+                    path_value=os.path.realpath(str(item.get('path','')))
+                    rid=item.get('record_id')
+                    if not isinstance(rid,int) or rid<=0 or not path_is_within(path_value,folder) or not os.path.isfile(path_value) or not path_value.lower().endswith('.pdf'): conflicts+=1; continue
+                    filename=os.path.basename(path_value)
+                    # Revalidate filename-to-record matching at confirmation; never trust a submitted record id alone.
+                    row=x.execute("SELECT id,record_number FROM records WHERE id=?",(rid,)).fetchone()
+                    if not row: conflicts+=1; continue
+                    stem=_norm_confirm(os.path.splitext(filename)[0])
+                    exact=[z for z in all_number_rows if _norm_confirm(z['record_number'])==stem]
+                    if exact:
+                        matched=exact
+                    else:
+                        pref=[z for z in all_number_rows if _norm_confirm(z['record_number']) and stem.startswith(_norm_confirm(z['record_number'])+'.')]
+                        if pref:
+                            longest=max(len(_norm_confirm(z['record_number'])) for z in pref)
+                            matched=[z for z in pref if len(_norm_confirm(z['record_number']))==longest]
+                        else:
+                            matched=[]
+                    if len(matched)!=1 or int(matched[0]['id'])!=rid:
+                        conflicts+=1; continue
+                    exists=[a for a in x.execute('SELECT id,relative_path FROM attachments').fetchall() if os.path.normcase(os.path.realpath(resolve_attachment_path(a['relative_path'])))==os.path.normcase(path_value)]
+                    if exists: conflicts+=1; continue
+                    size=os.path.getsize(path_value)
+                    x.execute("INSERT INTO attachments(record_id,original_name,stored_name,relative_path,mime_type,size_bytes) VALUES(?,?,?,?,?,?)",(rid,filename,filename,path_value,'application/pdf',size))
+                    created+=1
+                x.commit()
+                x.close()
+                audit(uid,'ربط ملفات PDF','مرفقات','',str(created)+' روابط؛ '+str(conflicts)+' تعارضات/تغييرات')
+                self.redir('/pdf-linker?success='+urllib.parse.quote('تم إنشاء '+str(created)+' رابطًا. تم تجاوز '+str(conflicts)+' حالة غير آمنة أو متعارضة. لم تُنقل الملفات ولم يُحذف أي ملف.'))
+                return
+            if path=='/attachments/unlink_safe':
+                if role!='admin': raise ValueError('فك ربط PDF متاح للمدير فقط.')
+                aid=form.get('attachment_id','')
+                row=x.execute("SELECT id,record_id,original_name FROM attachments WHERE id=?",(aid,)).fetchone()
+                if not row: raise ValueError('الرابط غير موجود.')
+                x.execute('DELETE FROM attachments WHERE id=?',(row['id'],))
+                x.commit()
+                x.close()
+                audit(uid,'فك ربط PDF','مرفقات',row['id'],row['original_name'])
+                self.redir('/pdf-linker?success='+urllib.parse.quote('تم حذف علاقة الربط من قاعدة البيانات فقط؛ بقي ملف PDF وسجل الأرشيف دون تغيير.'))
+                return
+
             if path=='/storage/import-confirm':
                 if role!='admin': raise ValueError('الاستيراد الذكي متاح للمدير فقط.')
                 if form.get('confirm_import')!='1': raise ValueError('يجب تأكيد الاستيراد صراحةً.')
