@@ -144,30 +144,19 @@ try:
     status, dash, _ = get(opener, base, "/")
     assert_true(status == 200 and "الوارد" in dash and "الصادر" in dash, "dashboard failed")
 
-    # Central templates are independent of the correspondence archive.
+    # Templates are managed directly in Settings; no global folder picker is exposed.
     status, templates_html, _ = get(opener, base, "/templates")
-    assert_true(status == 200 and "نماذج المراسلات" in templates_html, "templates page failed")
+    assert_true(status == 200 and "نماذج المراسلات" in templates_html,
+                "templates settings section failed")
+    assert_true('name="unit_id"' in templates_html and 'name="file"' in templates_html
+                and 'name="folder_path"' not in templates_html,
+                "template management should use only name, unit and file")
     template_dir = os.path.join(ROOT, "letter_templates")
     os.makedirs(template_dir, exist_ok=True)
     with open(os.path.join(template_dir, "نموذج QA.docx"), "wb") as tf:
         tf.write(b"QA placeholder; not opened during this test")
-    status, templates_html, _ = get(opener, base, "/templates")
-    assert_true(status == 200 and "نموذج QA.docx" in templates_html, "central template listing failed")
     assert_true(not os.path.exists(os.path.join(ROOT, "documents", "workspace")),
-                "template listing unexpectedly created an archive workspace")
-    token = csrf(templates_html)
-    _, tested_page, tested_url = post(opener, base, "/templates/path",
-                                      {"csrf_token":token,"folder_path":template_dir,"action":"test"})
-    assert_true("tested=1" in tested_url, "central template path test failed")
-    token = csrf(tested_page)
-    _, _, saved_url = post(opener, base, "/templates/path",
-                           {"csrf_token":token,"folder_path":template_dir,"action":"save"})
-    assert_true("/templates" in saved_url, "central template path save failed")
-    con = sqlite3.connect(app.DB_FILE)
-    saved_path = con.execute("SELECT value FROM settings WHERE key='templates_folder_path'").fetchone()[0]
-    con.close()
-    assert_true(os.path.abspath(saved_path) == os.path.abspath(template_dir),
-                "central template path was not persisted")
+                "template management unexpectedly created an archive workspace")
 
     # 4) Structure creation through the real HTTP form.
     _, settings, _ = get(opener, base, "/settings")
