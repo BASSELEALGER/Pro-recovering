@@ -184,28 +184,29 @@ try:
     con.close()
     assert_true(unit_id > 0, "unit creation failed")
 
-    # Unit/category-specific Word templates: add, reject accidental overwrite,
-    # replace atomically with a retained backup, and preserve other templates.
+    # Unit-only Word templates: require a unit, block accidental overwrite, and verify backups.
     _, templates_page, _ = get(opener, base, "/templates")
-    assert_true("templates/upload" in templates_page and "إدارية" in templates_page and
-                "مالية" in templates_page and "شهادات" in templates_page and "قرارات" in templates_page,
-                "categorized template management UI is missing")
+    assert_true('name="unit_id"' in templates_page and 'name="replace_existing"' in templates_page,
+                "unit-only template form or explicit replacement option missing")
+    assert_true('name="category"' not in templates_page and 'name="year"' not in templates_page
+                and 'name="storage_place_id"' not in templates_page,
+                "template form still exposes category/year/storage fields")
     token = csrf(templates_page)
-    template_fields = {"csrf_token":token,"unit_id":str(unit_id),"category":"إدارية"}
+    template_fields = {"csrf_token":token,"unit_id":str(unit_id)}
     _, _, upload_url = post_multipart(opener, base + "/templates/upload", template_fields,
                                       "نموذج الوحدة.docx", b"template-version-1")
     assert_true("success=" in upload_url, "unit-specific template upload failed: " + upload_url)
-    unit_template_dir = os.path.join(template_dir, "QA الوحدة", "إدارية")
+    unit_template_dir = os.path.join(template_dir, "unit_" + str(unit_id))
     unit_template = os.path.join(unit_template_dir, "نموذج الوحدة.docx")
-    assert_true(os.path.isfile(unit_template), "unit/category template was not created")
+    assert_true(os.path.isfile(unit_template), "unit-specific template was not created")
     with open(unit_template, "rb") as stream:
         assert_true(stream.read() == b"template-version-1", "uploaded template bytes changed")
     _, templates_page, _ = get(opener, base, "/templates")
-    assert_true("نموذج الوحدة.docx" in templates_page and "QA الوحدة" in templates_page,
-                "uploaded unit/category template was not listed")
+    assert_true("نموذج الوحدة" in templates_page and "QA الوحدة" in templates_page,
+                "uploaded unit template was not listed")
     token = csrf(templates_page)
     _, _, duplicate_url = post_multipart(opener, base + "/templates/upload",
-                                         {"csrf_token":token,"unit_id":str(unit_id),"category":"إدارية"},
+                                         {"csrf_token":token,"unit_id":str(unit_id)},
                                          "نموذج الوحدة.docx", b"must-not-overwrite")
     assert_true("error=" in duplicate_url, "duplicate template upload was not blocked")
     with open(unit_template, "rb") as stream:
@@ -213,8 +214,7 @@ try:
     _, templates_page, _ = get(opener, base, "/templates")
     token = csrf(templates_page)
     _, _, replace_url = post_multipart(opener, base + "/templates/upload",
-                                       {"csrf_token":token,"unit_id":str(unit_id),
-                                        "category":"إدارية","replace_existing":"1"},
+                                       {"csrf_token":token,"unit_id":str(unit_id),"replace_existing":"1"},
                                        "نموذج الوحدة.docx", b"template-version-2")
     assert_true("success=" in replace_url, "explicit template replacement failed")
     with open(unit_template, "rb") as stream:
@@ -223,6 +223,17 @@ try:
     assert_true(len(backups) == 1, "replacement did not preserve a backup of the previous template")
     assert_true(os.path.isfile(os.path.join(template_dir, "نموذج QA.docx")),
                 "adding/replacing a unit template damaged an unrelated legacy template")
+    _, new_form, _ = get(opener, base, "/incoming/new")
+    assert_true("unitTemplatesPanel" in new_form and "unitTemplates.filter" in new_form
+                and "نموذج الوحدة" in new_form,
+                "incoming form does not provide unit-filtered template links")
+    con = sqlite3.connect(app.DB_FILE)
+    con.execute("INSERT INTO templates(name,year,storage_place_id,unit_id,file_path) VALUES(?,NULL,NULL,NULL,?)",
+                ("QA global legacy", os.path.relpath(os.path.join(template_dir,"نموذج QA.docx"),template_dir).replace(os.sep,"/")))
+    con.commit()
+    con.close()
+    _, templates_page, _ = get(opener, base, "/templates")
+    assert_true("QA global legacy" not in templates_page, "legacy global template should not be exposed")
     _, settings, _ = get(opener, base, "/settings")
     token = csrf(settings)
     _, _, storage_delete_url = post(opener, base, "/storage/delete",
@@ -241,6 +252,9 @@ try:
     incoming_subject = con.execute("SELECT subject FROM records WHERE id=?", (incoming_id,)).fetchone()[0]
     con.close()
     assert_true(incoming_subject == "", "an empty optional correspondence subject was not preserved")
+    _, incoming_detail, _ = get(opener, base, "/records/view?id=%d" % incoming_id)
+    assert_true("نموذج الوحدة" in incoming_detail and "QA global legacy" not in incoming_detail,
+                "record detail exposed a global template or omitted its unit's template")
 
     _, settings, _ = get(opener, base, "/settings")
     token = csrf(settings)
