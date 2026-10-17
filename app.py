@@ -296,7 +296,7 @@ DEFAULT_FIELDS={
  'outgoing_number':'رقم الصادر','outgoing_subject':'موضوع الصادر','outgoing_date':'تاريخ الصادر','outgoing_location':'مكان حفظ الصادر','outgoing_notes':'ملاحظات','outgoing_created_at':'تاريخ الإضافة'
 }
 
-MENU=[('dashboard','📊 لوحة التحكم','/'),('incoming','📥 الوارد','/incoming'),('outgoing','📤 الصادر','/outgoing'),('search','🔎 البحث','/search'),('reports','📈 التقارير والطباعة','/reports'),('quick','⚡ الفتح السريع','/quick-links'),('settings','⚙️ الإعدادات','/settings'),('about','ℹ️ حول البرنامج','/about')]
+MENU=[('dashboard','📊 الإحصائيات','/'),('incoming','📥 الوارد','/incoming'),('outgoing','📤 الصادر','/outgoing'),('search','🔎 البحث','/search'),('reports','📈 التقارير والطباعة','/reports'),('quick','⚡ الفتح السريع','/quick-links'),('settings','⚙️ الإعدادات','/settings'),('about','ℹ️ حول البرنامج','/about')]
 
 
 def find_available_port(host, start=8080, end=8099):
@@ -1370,9 +1370,26 @@ class H(BaseHTTPRequestHandler):
 <section class="chart-panel"><h3>حالة الربط</h3><div class="link-summary"><div><strong>{linked}</strong><span>سجلات مرتبطة</span></div><div><strong>{unlinked}</strong><span>سجلات غير مرتبطة</span></div></div><p class="muted">الشهر الحالي: وارد {month_in} — صادر {month_out}</p></section>
 <section class="chart-panel"><h3>حالة ربط ملفات PDF</h3><div class="link-summary"><div><strong>{pdf_linked}</strong><span>سجلات لها PDF</span></div><div><strong>{pdf_unlinked}</strong><span>سجلات بلا PDF</span></div><div><strong>{broken_pdf_count}</strong><span>ملفات مفقودة/روابط مكسورة</span></div></div><p class="muted">تُحسب الروابط حسب ملفات PDF المسجلة، ولا يؤدي حذف الملف الأصلي إلى حذف سجل المراسلة.</p></section>
 </div></div>'''
+        floor_palette=['#ef476f','#06d6a0','#118ab2','#ffd166','#9b5de5','#f15bb5','#00bbf9','#f77f00']
+        building_floors=''.join(
+            f'<div class="building-floor" style="--floor-color:{floor_palette[i%len(floor_palette)]};--floor-delay:{i*90}ms"><span>الطابق {i+1} — سنة {esc(row["record_year"])}</span><b>{int(row["record_count"])} مراسلة</b></div>'
+            for i,row in enumerate(year_rows[:8])
+        ) or '<div class="building-floor" style="--floor-color:#118ab2"><span>لا توجد بيانات سنوية بعد</span><b>0 مراسلة</b></div>'
+        building_ui = '''<div class="card archive-building-card"><button type="button" class="stat-building-card" id="archiveBuildingToggle" aria-expanded="false"><span class="building-icon">🏢</span><span><b>عمارة إحصاءات الأرشيف</b><small>اضغط لبناء الطوابق وفق السنوات والبيانات المعروضة</small></span></button><div id="archiveBuilding" class="archive-building" hidden><div class="building-roof">🏢 Digital Archive Pro</div>''' + building_floors + '''</div></div>
+<style>
+.stat-building-card{width:100%;display:flex;align-items:center;gap:14px;text-align:right;padding:16px;border:1px solid #d8e4ef;border-radius:12px;background:linear-gradient(115deg,#fff,#edf8ff);cursor:pointer;color:#17324d}
+.stat-building-card:hover{box-shadow:0 5px 18px rgba(20,70,110,.12);transform:translateY(-1px)}
+.building-icon{font-size:36px;line-height:1}.stat-building-card b{display:block;font-size:17px}.stat-building-card small{display:block;margin-top:5px;color:#5d6d7e}
+.archive-building{max-width:720px;margin:18px auto 4px;padding:12px;border:1px solid #d6e2ed;border-radius:12px;background:linear-gradient(#f7fbff,#eaf2fa)}
+.building-roof{text-align:center;font-weight:900;padding:10px;margin:0 auto 8px;max-width:420px;background:#34495e;color:white;border-radius:9px 9px 3px 3px}
+.building-floor{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;margin:7px auto;max-width:620px;min-height:44px;border:2px solid rgba(255,255,255,.8);border-radius:8px;background:var(--floor-color);color:#fff;font-weight:800;box-shadow:0 3px 8px rgba(20,40,70,.12);opacity:0;transform:translateY(16px) scale(.98);transition:opacity .28s ease,transform .28s ease;transition-delay:var(--floor-delay)}
+.building-floor.revealed{opacity:1;transform:translateY(0) scale(1)}
+@media(prefers-reduced-motion:reduce){.building-floor{transition:none}.stat-building-card:hover{transform:none}}
+</style>
+<script>(function(){var b=document.getElementById('archiveBuildingToggle'),p=document.getElementById('archiveBuilding');if(!b||!p)return;b.addEventListener('click',function(){var opening=p.hasAttribute('hidden');if(!opening){p.setAttribute('hidden','');b.setAttribute('aria-expanded','false');b.querySelector('small').textContent='اضغط لبناء الطوابق وفق السنوات والبيانات المعروضة';p.querySelectorAll('.building-floor').forEach(function(f){f.classList.remove('revealed')});return;}p.removeAttribute('hidden');b.setAttribute('aria-expanded','true');b.querySelector('small').textContent='الطوابق محسوبة من الإحصاءات المفلترة';p.querySelectorAll('.building-floor').forEach(function(f,i){window.setTimeout(function(){f.classList.add('revealed')},i*100)});});})();</script>'''
         rh=''.join(f'<tr><td>{"وارد" if r["direction"]=="incoming" else "صادر"}</td><td>{esc(r["record_number"])}/{esc(r["record_year"])}</td><td>{esc(r["subject"])}</td><td>{esc(r["unit_name"] or "")}</td><td>{esc(effective_location(r))}</td><td><a class="btn btn-sm" href="/records/view?id={r["id"]}">عرض</a></td></tr>' for r in rows) or '<tr><td colspan="6" class="text-center">لا توجد سجلات</td></tr>'
         quick=''.join(f'<a class="btn" href="{esc(l["url"])}">{esc(l["title"])}</a>' for l in qlinks)
-        c=f'''{filter_ui}<div class="stat-circles">
+        c=f'''{filter_ui}{building_ui}<div class="stat-circles">
 <div class="stat-circle-card"><div class="stat-circle circle-total"><span>{total}</span></div><h3>إجمالي المراسلات</h3></div>
 <div class="stat-circle-card"><div class="stat-circle circle-incoming"><span>{counts['incoming']}</span></div><h3>الوارد</h3><small>هذا الشهر: {month_in}</small></div>
 <div class="stat-circle-card"><div class="stat-circle circle-outgoing"><span>{counts['outgoing']}</span></div><h3>الصادر</h3><small>هذا الشهر: {month_out}</small></div>
@@ -1381,7 +1398,7 @@ class H(BaseHTTPRequestHandler):
 <div class="stat-circle-card"><div class="stat-circle circle-years"><span>{year_count}</span></div><h3>سنوات مؤرشفة</h3></div>
 <div class="stat-circle-card"><div class="stat-circle circle-files"><span>{attachment_count}</span></div><h3>نسخ رقمية مرفقة</h3></div>
 </div>{quick}{charts_html}<div class="card"><div class="flex-space mb-3"><h2>آخر السجلات المضافة</h2><div><a class="btn btn-success" href="/incoming/new">＋ وارد</a> <a class="btn btn-warning" href="/outgoing/new">＋ صادر</a></div></div><div class="table-responsive"><table><tr><th>النوع</th><th>الرقم</th><th>الموضوع</th><th>الوحدة</th><th>مكان الحفظ</th><th>إجراء</th></tr>{rh}</table></div></div>'''
-        self.sendhtml(base('لوحة التحكم',c,'dashboard',err,ok,uid))
+        self.sendhtml(base('الإحصائيات',c,'dashboard',err,ok,uid))
 
     def records_page(self,path,q,uid,f,s,err,ok):
         direction='incoming' if path=='/incoming' else 'outgoing'; title=s['incoming_title'] if direction=='incoming' else s['outgoing_title']; number=f['incoming_number'] if direction=='incoming' else f['outgoing_number']; subject=f['incoming_subject'] if direction=='incoming' else f['outgoing_subject']; date_label=f['incoming_date'] if direction=='incoming' else f['outgoing_date']; loc=f['physical_location'] if direction=='incoming' else f['outgoing_location']
