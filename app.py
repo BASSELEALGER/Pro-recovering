@@ -2181,35 +2181,85 @@ class H(BaseHTTPRequestHandler):
             if not u: return
             if u['role']!='admin':
                 self.redir('/settings?error='+urllib.parse.quote('المدير فقط يستطيع إضافة النماذج.')); return
+            tx=None
+            tmp_path=''
             try:
                 form,upload=self.multipart_file()
                 self.require_csrf(form)
                 tname=(form.get('name','') or '').strip()
                 if not tname: raise ValueError('اسم النموذج مطلوب.')
+                unit_raw=normalize_digits(form.get('unit_id') or '').strip()
+                if not unit_raw.isdigit() or int(unit_raw)<=0: raise ValueError('اختر وحدة محددة لهذا النموذج.')
+                u_id=int(unit_raw)
                 if not upload: raise ValueError('اختر ملف Word بصيغة doc أو docx.')
                 _,orig_name,_,fdata=upload
                 ext=os.path.splitext(orig_name)[1].lower()
-                if ext not in TEMPLATE_EXTENSIONS: raise ValueError('صيغة الملف غير مدعومة؛ يجب أن يكون doc أو docx.')
-                tfolder=resolve_templates_folder(settings().get('templates_folder_path','letter_templates'))
+                if ext not in ('.doc','.docx'): raise ValueError('صيغة الملف غير مدعومة؛ يجب أن يكون doc أو docx.')
+                tfolder=os.path.realpath(resolve_templates_folder(settings().get('templates_folder_path','letter_templates')))
                 os.makedirs(tfolder,exist_ok=True)
-                safe_fname=safe_folder_component(os.path.splitext(orig_name)[0])+ext
-                save_path=os.path.join(tfolder,safe_fname)
-                c_idx=1
-                while os.path.exists(save_path):
-                    save_path=os.path.join(tfolder,f"{safe_folder_component(os.path.splitext(orig_name)[0])}_{c_idx}{ext}")
-                    c_idx+=1
-                with open(save_path,'wb') as fp: fp.write(fdata)
-                rel_f=os.path.relpath(save_path,tfolder).replace(os.sep,'/')
-                sp_id=int(form.get('storage_place_id') or 0) or None
-                u_id=int(form.get('unit_id') or 0) or None
-                y_val=int(normalize_digits(form.get('year') or 0)) or None
-                x=db()
-                x.execute("INSERT INTO templates(name,year,storage_place_id,unit_id,file_path) VALUES(?,?,?,?,?)",
-                          (tname,y_val,sp_id,u_id,rel_f))
-                x.commit(); x.close()
-                audit(u['id'],'إضافة نموذج','نماذج',tname,f'unit={u_id}; year={y_val}; file={rel_f}')
-                self.redir('/settings?success='+urllib.parse.quote('تم حفظ نموذج المراسلة بنجاح.')); return
+                tx=db()
+                unit_row=tx.execute('SELECT id FROM units WHERE id=?',(u_id,)).fetchone()
+                if not unit_row: raise ValueError('الوحدة المحددة غير موجودة؛ حدّث الصفحة ثم اختر وحدة صحيحة.')
+                existing_rows=tx.execute('SELECT * FROM templates WHERE unit_id=? AND name=? COLLATE NOCASE ORDER BY id DESC',(u_id,tname)).fetchall()
+                if len(existing_rows)>1:
+                    raise ValueError('توجد مراجع مكررة بهذا الاسم والوحدة. أزل التكرار يدويًا قبل الاستبدال حفاظًا على الملفات.')
+                existing=existing_rows[0] if existing_rows else None
+                if existing and form.get('replace_existing')!='1':
+                    raise ValueError('يوجد نموذج بهذا الاسم لهذه الوحدة. فعّل خيار الاستبدال بعد مراجعة التأكيد لإنشاء نسخة احتياطية.')
+                unit_folder=os.path.join(tfolder,'unit_'+str(u_id))
+                os.makedirs(unit_folder,exist_ok=True)
+                safe_name=safe_folder_component(tname)
+                target_path=os.path.join(unit_folder,safe_name+ext)
+                old_path=''
+                if existing:
+                    old_path=os.path.realpath(os.path.join(tfolder,str(existing['file_path'] or '')))
+                    if not path_is_within(old_path,tfolder) or not os.path.isfile(old_path):
+                        raise ValueError('تعذر الاستبدال الآمن لأن ملف النموذج السابق مفقود أو خارج مجلد النماذج. لم تتغير البيانات.')
+                    backup_path=old_path+'.bak'
+                    if os.path.exists(backup_path):
+                        backup_path=old_path+'.'+datetime.datetime.now().strftime('%Y%m%d%H%M%S')+'.'+uuid.uuid4().hex[:6]+'.bak'
+                    shutil.copy2(old_path,backup_path)
+                    def _template_digest(path):
+                        digest=hashlib.sha256()
+                        with open(path,'rb') as stream:
+                            for chunk in iter(lambda:stream.read(1024*1024),b''):
+                                digest.update(chunk)
+                        return digest.digest()
+                    if _template_digest(old_path)!=_template_digest(backup_path):
+                        raise ValueError('فشل التحقق من النسخة الاحتياطية؛ لم يُستبدل النموذج.')
+                if os.path.exists(target_path) and (not old_path or os.path.normcase(os.path.realpath(target_path))!=os.path.normcase(old_path)):
+                    base_name,base_ext=os.path.splitext(target_path)
+                    index=1
+                    while os.path.exists(target_path):
+                        target_path=base_name+'_'+str(index)+base_ext
+                        index+=1
+                tmp_path=target_path+'.tmp-'+uuid.uuid4().hex
+                with open(tmp_path,'wb') as stream:
+                    stream.write(fdata)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(tmp_path,target_path)
+                tmp_path=''
+                rel_f=os.path.relpath(target_path,tfolder).replace(os.sep,'/')
+                if existing:
+                    tx.execute('UPDATE templates SET file_path=? WHERE id=?',(rel_f,int(existing['id'])))
+                    action='استبدال نموذج'
+                else:
+                    tx.execute("INSERT INTO templates(name,year,storage_place_id,unit_id,file_path) VALUES(?,NULL,NULL,?,?)",(tname,u_id,rel_f))
+                    action='إضافة نموذج'
+                tx.commit()
+                tx.close()
+                tx=None
+                audit(u['id'],action,'نماذج',tname,f'unit={u_id}; file={rel_f}')
+                self.redir('/settings?success='+urllib.parse.quote('تم حفظ النموذج الخاص بالوحدة بنجاح.')); return
             except Exception as e:
+                if tx is not None:
+                    try: tx.close()
+                    except Exception: pass
+                if tmp_path:
+                    try:
+                        if os.path.isfile(tmp_path): os.remove(tmp_path)
+                    except Exception: pass
                 self.redir('/settings?error='+urllib.parse.quote(str(e))); return
 
         form=self.postdata()
