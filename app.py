@@ -3280,7 +3280,10 @@ def run_server():
     safe_console_print(f'Digital Archive Pro جاهز على العنوان المحلي: {url}')
     _open_browser_when_ready(url)
     try:
-        server.serve_forever()
+        # A security trigger can arrive during startup before SERVER_INSTANCE exists.
+        # In that case do not start accepting requests after shutdown was requested.
+        if not SHUTDOWN_IN_PROGRESS.is_set():
+            server.serve_forever()
     finally:
         server.server_close()
         _close_managed_chrome()
