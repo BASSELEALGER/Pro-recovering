@@ -2183,6 +2183,10 @@ class H(BaseHTTPRequestHandler):
                 self.redir('/settings?error='+urllib.parse.quote('المدير فقط يستطيع إضافة النماذج.')); return
             tx=None
             tmp_path=''
+            old_path=''
+            backup_path=''
+            target_path=''
+            replacement_committed=False
             try:
                 form,upload=self.multipart_file()
                 self.require_csrf(form)
@@ -2248,6 +2252,7 @@ class H(BaseHTTPRequestHandler):
                     tx.execute("INSERT INTO templates(name,year,storage_place_id,unit_id,file_path) VALUES(?,NULL,NULL,?,?)",(tname,u_id,rel_f))
                     action='إضافة نموذج'
                 tx.commit()
+                replacement_committed=True
                 tx.close()
                 tx=None
                 audit(u['id'],action,'نماذج',tname,f'unit={u_id}; file={rel_f}')
@@ -2256,6 +2261,12 @@ class H(BaseHTTPRequestHandler):
                 if tx is not None:
                     try: tx.close()
                     except Exception: pass
+                if existing and backup_path and old_path and target_path and not replacement_committed:
+                    try:
+                        if os.path.normcase(os.path.realpath(target_path))==os.path.normcase(old_path) and os.path.isfile(backup_path):
+                            shutil.copy2(backup_path,old_path)
+                    except Exception:
+                        pass
                 if tmp_path:
                     try:
                         if os.path.isfile(tmp_path): os.remove(tmp_path)
