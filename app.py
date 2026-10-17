@@ -2186,6 +2186,7 @@ class H(BaseHTTPRequestHandler):
             old_path=''
             backup_path=''
             target_path=''
+            existing=None
             replacement_committed=False
             try:
                 form,upload=self.multipart_file()
