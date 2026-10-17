@@ -3277,8 +3277,11 @@ def run_server():
     SERVER_INSTANCE=server
     _write_single_instance_port(PORT)
     url=f'http://{HOST}:{PORT}'
-    safe_console_print(f'Digital Archive Pro جاهز على العنوان المحلي: {url}')
-    _open_browser_when_ready(url)
+    if not SHUTDOWN_IN_PROGRESS.is_set():
+        safe_console_print(f'Digital Archive Pro جاهز على العنوان المحلي: {url}')
+        _open_browser_when_ready(url)
+    else:
+        safe_console_print('[SECURITY] Startup cancelled because a security shutdown was requested.')
     try:
         # A security trigger can arrive during startup before SERVER_INSTANCE exists.
         # In that case do not start accepting requests after shutdown was requested.
