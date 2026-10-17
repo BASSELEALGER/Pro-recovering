@@ -1,26 +1,36 @@
-DIGITAL ARCHIVE PRO — DEVELOPMENT STATUS
-Copyright: © Noureddine 2026
+DIGITAL ARCHIVE PRO — الحزمة المحمولة
+© Noureddine 2026
 
-IMPORTANT
-This repository currently does NOT contain a verified standalone Portable release.
-The current launcher uses a Python installation already present on the computer.
-Do not treat this source package as the final offline package requested for end users.
+1) المتطلبات
+- Windows 7 SP1 أو Windows 10/11 (التوافق الفعلي يتوقف على إصدار Windows وPython المثبت).
+- Python 3.8 أو أحدث، مع ملاحظة أن Windows 7 يحتاج عادةً Python 3.8 إصدار 32-bit.
+- لا تحتاج الحزمة إلى اتصال بالإنترنت أثناء التشغيل.
+- يعتمد التطبيق على مكتبات Python القياسية؛ لا يتطلب تنزيل مكتبات خارجية عند التشغيل.
 
-RUNNING FROM SOURCE
-1. Install Python 3.8 or later.
-2. Extract the source package to a writable folder.
-3. Run نظام_الأرشيف_الرقمي.bat or run: python app.py
-4. Keep the console open while using the program.
-5. The service is intended to listen on 127.0.0.1 only.
+2) التشغيل
+- استخرج كل محتويات ZIP إلى مجلد عادي قابل للكتابة.
+- لا تشغّل app.py من داخل عارض ZIP.
+- انقر مرتين على: نظام_الأرشيف_الرقمي.bat
+- اترك نافذة التشغيل مفتوحة أثناء استعمال التطبيق. يفتح المتصفح محليًا عند جاهزية الخادم.
+- عنوان الخدمة محلي على الجهاز (127.0.0.1)، وليس موقعًا عامًا.
 
-DATA
-- archive.db is created beside the source.
-- The digital archive root is configurable in Settings.
-- Back up the database and digital archive before maintenance.
-- Never delete archive.db or the archive root unless you intend to delete the data.
+3) البيانات والحفاظ عليها
+- قاعدة البيانات archive.db تُنشأ بجوار app.py عند أول تشغيل.
+- مجلد الأرشيف الفعلي يُحدد من إعدادات البرنامج.
+- انسخ قاعدة البيانات ومجلد الأرشيف إلى نسخة احتياطية قبل أي صيانة أو نقل.
+- لا تحذف archive.db أو مجلد الأرشيف أو النسخ الاحتياطية إذا كنت تريد الاحتفاظ بالبيانات.
+- فك ضغط إصدار جديد في مجلد منفصل أولًا؛ لا تستبدل ملفات البيانات القديمة عشوائيًا.
 
-RELEASE VALIDATION
-- Latest branch source has not been syntax-compiled or integration-tested in this environment.
-- No fresh portable runtime package has been built from this branch.
-- Windows 10/11 and Windows 7 SP1 32-bit compatibility are NOT verified for this branch.
-- Do not infer native Windows compatibility from source inspection or from a report generated on another operating system.
+4) التشغيل دون إنترنت
+- لا يلزم اتصال بالإنترنت للتشغيل العادي.
+- لا تُضمّن الحزمة ملفات EXE أو مُثبّت Python.
+- لا يقوم المشغّل بتثبيت المكتبات أو تنزيلها تلقائيًا.
+- إعداد مراقبة الاتصال الخارجي داخل التطبيق، إن تم تفعيله، قد يوقف التطبيق عند اكتشاف اتصال خارجي وفق إعدادات الحماية.
+
+5) فحص اختياري
+- مجلد tests يحتوي اختبارات QA للمطور. لا تستخدمها على قاعدة بياناتك الفعلية؛ الاختبارات مصممة لاستخدام قواعد مؤقتة.
+- نجاح الاختبار على جهاز واحد لا يثبت التوافق على جميع إصدارات Windows.
+
+6) حدود التحقق
+- لا يُعلن هذا الملف وحده أن الحزمة اختُبرت فعليًا على Windows 7 SP1 32-bit أو Windows 10/11.
+- اختبر التشغيل على الجهاز المستهدف قبل اعتماد الحزمة للاستخدام الإداري اليومي.
