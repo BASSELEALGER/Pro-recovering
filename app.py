@@ -48,15 +48,29 @@ SECURITY_LOCK=threading.Lock()
 INTERNET_WATCHER_STARTED=False
 INTERNET_WATCHER_STOP=threading.Event()
 CHROME_PROCESS=None
+CHROME_PROFILE_DIR=None
+SHUTDOWN_IN_PROGRESS=threading.Event()
+SHUTDOWN_LOCK=threading.Lock()
 
 def _close_managed_chrome():
+    """Close only the Chrome process tree launched with this app's private profile."""
     global CHROME_PROCESS
-    if CHROME_PROCESS:
+    proc=CHROME_PROCESS
+    CHROME_PROCESS=None
+    if not proc:
+        return
+    try:
+        if os.name=='nt' and proc.poll() is None:
+            subprocess.run(['taskkill','/PID',str(proc.pid),'/T','/F'],
+                           stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL,timeout=5,check=False)
+        elif proc.poll() is None:
+            proc.terminate()
+            try: proc.wait(timeout=1.5)
+            except Exception: proc.kill()
+    except Exception:
         try:
-            CHROME_PROCESS.terminate()
-            time.sleep(0.15)
-            if CHROME_PROCESS.poll() is None:
-                CHROME_PROCESS.kill()
+            if proc.poll() is None: proc.kill()
         except Exception:
             pass
 
@@ -94,18 +108,32 @@ def _probe_local_network():
     return False
 
 _shutdown_after_security_warning = None
-def _hard_internet_shutdown():
-    safe_console_print('[SECURITY] Internet connectivity detected! Immediate hard shutdown initiated to protect archive data.')
+def _request_safe_shutdown(reason):
+    """Stop accepting new HTTP requests, let active request threads finish, then exit normally."""
+    if SHUTDOWN_IN_PROGRESS.is_set():
+        return
+    with SHUTDOWN_LOCK:
+        if SHUTDOWN_IN_PROGRESS.is_set():
+            return
+        SHUTDOWN_IN_PROGRESS.set()
+    safe_console_print('[SECURITY] Safe shutdown requested:',reason)
     try:
-        audit(0,'تنبيه أمان','حماية الشبكة','','تم اكتشاف اتصال فعلي بالإنترنت — إغلاق فوري للبرنامج وجلسة Chrome.')
+        audit(0,'تنبيه أمان','حماية الشبكة','',reason)
     except Exception:
         pass
-    _close_managed_chrome()
-    global SERVER_INSTANCE
-    if SERVER_INSTANCE:
-        try: SERVER_INSTANCE.shutdown()
-        except Exception: pass
-    os._exit(0)
+    INTERNET_WATCHER_STOP.set()
+    USB_WATCHER_STOP.set()
+    server=SERVER_INSTANCE
+    if server:
+        try:
+            server.shutdown()
+        except Exception:
+            pass
+    else:
+        _close_managed_chrome()
+
+def _hard_internet_shutdown():
+    _request_safe_shutdown('تم اكتشاف اتصال فعلي بالإنترنت — إيقاف آمن بعد إكمال الطلبات الجارية وإغلاق Chrome الخاص بالبرنامج.')
 
 _shutdown_after_security_warning = _hard_internet_shutdown
 def _start_connectivity_monitor():
@@ -180,6 +208,42 @@ def _start_usb_watcher():
                 pass
             USB_WATCHER_STOP.wait(1.0)
     threading.Thread(target=watch,name='USBDriveWatcher',daemon=True).start()
+
+NATIVE_ALARM_STARTED=False
+def _start_native_security_alarm():
+    """Repeat a built-in Windows tone until USB/LAN warning is acknowledged."""
+    global NATIVE_ALARM_STARTED
+    if NATIVE_ALARM_STARTED:
+        return
+    NATIVE_ALARM_STARTED=True
+    def alarm_worker():
+        while not USB_WATCHER_STOP.is_set():
+            try:
+                cfg=security_settings()
+                with SECURITY_LOCK:
+                    usb_pending=bool(SECURITY_STATE.get('new_drive_events')) if cfg['usb_warning'] else False
+                    lan_pending=bool(SECURITY_STATE.get('lan_alert_pending')) if cfg['lan_warning'] else False
+                    if not cfg['usb_warning']:
+                        SECURITY_STATE['new_drive_events']=[]
+                    if not cfg['lan_warning']:
+                        SECURITY_STATE['lan_alert_pending']=False
+                if usb_pending or lan_pending:
+                    if os.name=='nt':
+                        try:
+                            import winsound
+                            winsound.Beep(1150,240)
+                            winsound.Beep(620,240)
+                        except Exception:
+                            try: ctypes.windll.user32.MessageBeep(0x00000010)
+                            except Exception: pass
+                            USB_WATCHER_STOP.wait(0.15)
+                    else:
+                        USB_WATCHER_STOP.wait(0.45)
+                else:
+                    USB_WATCHER_STOP.wait(0.25)
+            except Exception:
+                USB_WATCHER_STOP.wait(0.5)
+    threading.Thread(target=alarm_worker,name='NativeSecurityAlarm',daemon=True).start()
 
 def security_settings():
     s=settings()
@@ -2392,13 +2456,8 @@ class H(BaseHTTPRequestHandler):
                 self.send_response(200); self.send_header('Content-Type','application/json'); self.end_headers()
                 self.wfile.write(b'{"status":"shutting_down"}')
                 def exit_job():
-                    time.sleep(0.3)
-                    _close_managed_chrome()
-                    global SERVER_INSTANCE
-                    if SERVER_INSTANCE:
-                        try: SERVER_INSTANCE.shutdown()
-                        except Exception: pass
-                    os._exit(0)
+                    time.sleep(0.2)
+                    _request_safe_shutdown('طلب المستخدم إغلاق البرنامج من نافذة الحماية.')
                 threading.Thread(target=exit_job,daemon=True).start(); return
 
             if path in ('/settings/templates/delete','/templates/delete'):
@@ -2946,7 +3005,8 @@ def _write_single_instance_port(port):
         pass
 
 def _open_chrome_or_default(url):
-    """Prefer Google Chrome, falling back to the system browser when unavailable."""
+    """Launch Chrome in an isolated app-owned profile; never take over personal Chrome."""
+    global CHROME_PROCESS, CHROME_PROFILE_DIR
     candidates=[]
     if os.name=='nt':
         chrome_on_path=shutil.which('chrome.exe') or shutil.which('chrome')
@@ -2970,12 +3030,17 @@ def _open_chrome_or_default(url):
             continue
         seen.add(key)
         try:
-            proc = subprocess.Popen([executable,'--new-window',url],
-                             stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL,close_fds=True)
-            global CHROME_PROCESS; CHROME_PROCESS = proc
+            CHROME_PROFILE_DIR=os.path.join(BASE_DIR,'.digital_archive_chrome_profile_'+uuid.uuid4().hex)
+            os.makedirs(CHROME_PROFILE_DIR,exist_ok=True)
+            CHROME_PROCESS=subprocess.Popen(
+                [executable,'--user-data-dir='+CHROME_PROFILE_DIR,'--no-first-run',
+                 '--no-default-browser-check','--disable-background-mode','--new-window',url],
+                stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,close_fds=True)
             return True
         except Exception:
+            CHROME_PROCESS=None
+            CHROME_PROFILE_DIR=None
             continue
     try:
         return bool(webbrowser.open(url,new=1))
@@ -3194,6 +3259,7 @@ def run_server():
     ensure_security_settings()
     # The watcher monitors local mounted drives only; no network scanning.
     _start_usb_watcher()
+    _start_native_security_alarm()
     _start_connectivity_monitor()
     server=None
     last_error=None
@@ -3206,7 +3272,8 @@ def run_server():
             last_error=e
     if server is None:
         raise RuntimeError('تعذر العثور على منفذ محلي متاح بين 8080 و8099. أغلق نسخة أخرى من البرنامج ثم أعد المحاولة. '+str(last_error))
-    server.daemon_threads=True
+    server.daemon_threads=False
+    server.block_on_close=True
     SERVER_INSTANCE=server
     _write_single_instance_port(PORT)
     url=f'http://{HOST}:{PORT}'
@@ -3216,6 +3283,7 @@ def run_server():
         server.serve_forever()
     finally:
         server.server_close()
+        _close_managed_chrome()
         if SINGLE_INSTANCE_LOCK_HANDLE is not None:
             try: SINGLE_INSTANCE_LOCK_HANDLE.close()
             except Exception: pass
