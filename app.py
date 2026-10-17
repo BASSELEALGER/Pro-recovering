@@ -1422,18 +1422,12 @@ class H(BaseHTTPRequestHandler):
         rh=''.join(f'<tr><td><input type="checkbox" name="record_ids" value="{r["id"]}" aria-label="تحديد المراسلة {esc(record_number_display(r))}"></td><td>{esc(record_number_display(r))}</td><td>{esc(r["subject"])}</td><td>{esc(r["record_date"])}</td><td>{esc(r["unit_name"] or "—")}</td><td><strong>📍 {esc(r["physical_location"])}</strong></td><td><a class="btn btn-sm btn-primary" href="/records/view?id={r["id"]}">تفاصيل</a></td></tr>' for r in rows) or '<tr><td colspan="7" class="text-center">لا توجد نتائج.</td></tr>'
         addurl='/incoming/new' if direction=='incoming' else '/outgoing/new'; printurl=f'/print/records?direction={direction}'; pager=pagination_html(path,q,page,total,per_page)
         x_rec_tpl=db()
-        cond_t=[]; val_t=[]
         if unit:
-            cond_t.append('(t.unit_id = ? OR t.unit_id IS NULL OR t.unit_id = 0)')
-            val_t.append(int(unit))
-        if rd and re.match(r'^\d{4}',rd):
-            cond_t.append('(t.year = ? OR t.year IS NULL OR t.year = 0)')
-            val_t.append(int(rd[:4]))
-        where_t=' AND '.join(cond_t) if cond_t else '1=1'
-        tpl_rows=x_rec_tpl.execute('SELECT t.*, u.name as unit_name, s.name as storage_name FROM templates t LEFT JOIN units u ON u.id=t.unit_id LEFT JOIN storage_places s ON s.id=t.storage_place_id WHERE '+where_t+' ORDER BY t.name',val_t).fetchall()
-        x_rec_tpl.close()
+            tpl_rows=x_rec_tpl.execute('SELECT t.*,u.name AS unit_name FROM templates t JOIN units u ON u.id=t.unit_id WHERE t.unit_id=? ORDER BY t.name',(int(unit),)).fetchall()
+        else:
+            tpl_rows=[]
         if tpl_rows:
-            tpl_btns=''.join(f'<a class="btn btn-sm" href="/templates/download?id={t["id"]}" style="background:#eef6fc;color:#1b6ca8;border:1px solid #c8e1f5;display:inline-flex;align-items:center;gap:4px;margin:2px;" title="تحميل أو فتح في Word">📝 {esc(t["name"])}{(" ("+esc(t["unit_name"])+")") if t["unit_name"] else ""}{(" — "+str(t["year"])) if t["year"] else ""}</a>' for t in tpl_rows[:25])
+            tpl_btns=''.join(f'<a class="btn btn-sm" href="/templates/download?id={t["id"]}" style="background:#eef6fc;color:#1b6ca8;border:1px solid #c8e1f5;display:inline-flex;align-items:center;gap:4px;margin:2px;" title="تحميل أو فتح في Word">📝 {esc(t["name"])}{(" — "+esc(t["unit_name"])) if t["unit_name"] else ""}</a>' for t in tpl_rows[:25])
             tpl_panel=f'<div class="card" style="margin-bottom:15px;background:#fbfdfe;border-right:4px solid #16a085;"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;"><div><strong>📝 نماذج المراسلات (Word) الخاصة بالوحدة:</strong> <span class="muted">انقر لتحميل أو فتح النموذج:</span></div><div style="display:flex;flex-wrap:wrap;gap:4px;">{tpl_btns}</div></div></div>'
         else:
             tpl_panel=f'<div class="card" style="margin-bottom:15px;background:#fbfdfe;border-right:4px solid #16a085;"><div style="display:flex;justify-content:space-between;align-items:center;"><div><strong>📝 نماذج المراسلات (Word):</strong> <span class="muted">لا توجد نماذج مسجلة لهذه الوحدة حالياً. يمكنك إدارتها ورفعها من <a href="/settings#templates">الإعدادات</a>.</span></div></div></div>'
@@ -1497,11 +1491,11 @@ class H(BaseHTTPRequestHandler):
         attachments=x.execute('SELECT * FROM attachments WHERE record_id=? ORDER BY id',(rid,)).fetchall()
         unit_templates=[]
         if r['unit_id']:
-            unit_templates=x.execute('SELECT * FROM templates WHERE unit_id=? OR unit_id IS NULL OR unit_id=0 ORDER BY name',(r['unit_id'],)).fetchall()
+            unit_templates=x.execute('SELECT * FROM templates WHERE unit_id=? ORDER BY name',(r['unit_id'],)).fetchall()
         x.close()
         unit_tpl_section=''
         if unit_templates:
-            unit_tpl_links=''.join(f'<a class="btn btn-sm" href="/templates/download?id={t["id"]}" style="background:#eef6fc;color:#1b6ca8;border:1px solid #c8e1f5;margin:3px;" title="تحميل أو فتح في Word">📝 {esc(t["name"])}{(" — "+str(t["year"])) if t["year"] else ""}</a>' for t in unit_templates)
+            unit_tpl_links=''.join(f'<a class="btn btn-sm" href="/templates/download?id={t["id"]}" style="background:#eef6fc;color:#1b6ca8;border:1px solid #c8e1f5;margin:3px;" title="تحميل أو فتح في Word">📝 {esc(t["name"])}</a>' for t in unit_templates)
             unit_tpl_section=f'<div class="card"><h3>📝 نماذج المراسلات (Word) الخاصة بـ {esc(r["unit_name"] or "الوحدة")}</h3><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">{unit_tpl_links}</div></div>'
 
         edit=f'<a class="btn btn-primary" href="/records/edit?id={r["id"]}">تعديل</a>'
@@ -1903,26 +1897,24 @@ class H(BaseHTTPRequestHandler):
 <p class="muted">افحص أسماء ملفات PDF واعرض المطابقات عبر السنوات والوحدات قبل إنشاء أي رابط. لا يقرأ البرنامج محتوى الملفات، ولا ينقلها أو يحذفها، ولا يعمل الربط تلقائيًا.</p>
 <a class="btn btn-primary" href="/pdf-linker">فتح أداة ربط PDF ومعاينة المطابقات</a></div>'''
         x_t=db()
-        t_rows=x_t.execute('SELECT t.*, u.name as unit_name, s.name as sp_name FROM templates t LEFT JOIN units u ON u.id=t.unit_id LEFT JOIN storage_places s ON s.id=t.storage_place_id ORDER BY t.name').fetchall()
+        t_rows=x_t.execute('SELECT t.*, u.name as unit_name FROM templates t JOIN units u ON u.id=t.unit_id WHERE t.unit_id IS NOT NULL AND t.unit_id<>0 ORDER BY t.name').fetchall()
         x_t.close()
-        t_sp_opts='<option value="">عام / كل أماكن التخزين</option>'+''.join(f'<option value="{m["id"]}">{esc(m["name"])}</option>' for m in sps)
-        t_u_opts='<option value="">عام / كل الوحدات</option>'+''.join(f'<option value="{u["id"]}">{esc(u["name"])} ({esc(u["sp_name"] or "—")})</option>' for u in units)
-        t_table_rows=''.join(f'<tr><td><b>{esc(t["name"])}</b></td><td>{str(t["year"]) if t["year"] else "عام"}</td><td>{esc(t["sp_name"] or "عام")}</td><td>{esc(t["unit_name"] or "عام")}</td><td><code dir="ltr">{esc(t["file_path"])}</code></td><td><a class="btn btn-sm btn-primary" href="/templates/download?id={t["id"]}">📥 تحميل / فتح</a> <form method="POST" action="/settings/templates/delete" style="display:inline"><input type="hidden" name="id" value="{t["id"]}"><button class="btn btn-sm btn-danger" onclick="return confirm(\'هل تريد حذف مرجع هذا النموذج؟ لن يتم حذف الملف الأصلي من القرص.\')">حذف المرجع</button></form></td></tr>' for t in t_rows) or '<tr><td colspan="6" class="text-center">لا توجد نماذج مضافة حالياً. يمكنك إضافة نموذج من النموذج أدناه.</td></tr>'
-        templates_settings_ui=f'''<div class="card" id="templates"><h2>📝 إدارة نماذج المراسلات (Word)</h2>
-<p class="muted">تُدار نماذج المراسلات هنا وترتبط بالسنة والمخزن والوحدة، وتظهر تلقائيًا في شاشات الصادر والوارد للوحدة نفسها. حذف المرجع لا يحذف الملف الأصلي.</p>
+        t_u_opts='<option value="">اختر الوحدة</option>'+''.join(f'<option value="{u["id"]}">{esc(u["name"])}</option>' for u in units)
+        t_table_rows=''.join(f'<tr><td><b>{esc(t["name"])}</b></td><td>{esc(t["unit_name"] or "—")}</td><td><code dir="ltr">{esc(t["file_path"])}</code></td><td><a class="btn btn-sm btn-primary" href="/templates/download?id={t["id"]}">📥 فتح النموذج</a> <form method="POST" action="/settings/templates/delete" style="display:inline"><input type="hidden" name="id" value="{t["id"]}"><button class="btn btn-sm btn-danger" onclick="return confirm(\\'حذف مرجع النموذج فقط؟ سيبقى الملف الأصلي محفوظًا.\\')">حذف المرجع</button></form></td></tr>' for t in t_rows) or '<tr><td colspan="4" class="text-center">لا توجد نماذج خاصة بالوحدات حتى الآن.</td></tr>'
+        templates_settings_ui=f'''<div class="card" id="templates"><h2>📝 نماذج المراسلات (Word)</h2>
+<p class="muted">كل نموذج مرتبط بوحدة واحدة فقط. لا توجد تصنيفات أو نماذج عامة أو مشتركة. يظهر النموذج في المراسلات التابعة لوحدته فقط. حذف المرجع لا يحذف الملف الأصلي.</p>
 <form method="POST" action="/settings/templates/upload" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{csrf(self)}">
 <div class="settings-grid">
-<div class="form-group"><label>اسم النموذج</label><input name="name" class="form-control" placeholder="مثال: نموذج مذكرة إحالة" required></div>
-<div class="form-group"><label>السنة (اختياري)</label><input name="year" class="form-control" placeholder="مثال: 2026"></div>
-<div class="form-group"><label>مكان التخزين (المخزن)</label><select name="storage_place_id" class="form-control">{t_sp_opts}</select></div>
-<div class="form-group"><label>الوحدة</label><select name="unit_id" class="form-control">{t_u_opts}</select></div>
-<div class="form-group"><label>ملف Word (.doc, .docx)</label><input type="file" name="file" class="form-control" accept=".doc,.docx,.dotx" required></div>
+<div class="form-group"><label>اسم النموذج</label><input name="name" class="form-control" placeholder="مثال: نموذج إحالة" required></div>
+<div class="form-group"><label>الوحدة</label><select name="unit_id" class="form-control" required>{t_u_opts}</select></div>
+<div class="form-group"><label>ملف Word (.doc أو .docx)</label><input type="file" name="file" class="form-control" accept=".doc,.docx" required></div>
 </div>
-<button class="btn btn-success" type="submit">➕ حفظ النموذج وإضافته</button>
+<label class="check-row"><input type="checkbox" name="replace_existing" value="1"> استبدال نموذج سابق بالاسم نفسه لهذه الوحدة بعد إنشاء نسخة احتياطية منه</label>
+<button class="btn btn-success" type="submit" onclick="return !document.querySelector('[name=replace_existing]').checked || confirm('سيتم حفظ نسخة احتياطية من النموذج السابق ثم استبداله. متابعة؟')">➕ حفظ النموذج</button>
 </form>
 <hr style="margin:20px 0;border:0;border-top:1px solid #e1e8ed;">
-<h3>النماذج المسجلة في النظام</h3>
-<div class="table-responsive"><table><thead><tr><th>اسم النموذج</th><th>السنة</th><th>المخزن</th><th>الوحدة</th><th>الملف</th><th>إجراءات</th></tr></thead><tbody>{t_table_rows}</tbody></table></div>
+<h3>النماذج المسجلة</h3>
+<div class="table-responsive"><table><thead><tr><th>اسم النموذج</th><th>الوحدة</th><th>مسار الملف</th><th>إجراءات</th></tr></thead><tbody>{t_table_rows}</tbody></table></div>
 </div>'''
         login_ui=f'''<details class="card"><summary style="cursor:pointer;font-weight:bold;font-size:16px;padding:6px 0;">🎨 تخصيص واجهة الدخول — اضغط للفتح</summary><div style="margin-top:14px"><h2>🎨 تخصيص واجهة الدخول</h2>
 <p class="muted">عدّل النصوص وشاهد المعاينة فورًا، ثم احفظ. لا حاجة للخروج أو تسجيل الدخول مجددًا. البصمة ثابتة ولا يمكن تخصيصها.</p>
