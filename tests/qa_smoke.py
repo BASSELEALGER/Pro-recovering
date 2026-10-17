@@ -142,7 +142,9 @@ try:
     assert_true("© Noureddine 2026" in login_html, "fixed copyright signature missing after customization")
 
     status, dash, _ = get(opener, base, "/")
-    assert_true(status == 200 and "الوارد" in dash and "الصادر" in dash, "dashboard failed")
+    assert_true(status == 200 and "الوارد" in dash and "الصادر" in dash, "statistics page failed")
+    assert_true("الإحصائيات" in dash and "stat-building-card" in dash and "archiveBuilding" in dash,
+                "filtered statistics and animated archive building UI missing")
 
     # Templates are managed directly in Settings; no global folder picker is exposed.
     status, templates_html, _ = get(opener, base, "/templates")
