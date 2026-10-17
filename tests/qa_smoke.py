@@ -150,9 +150,13 @@ try:
     status, templates_html, _ = get(opener, base, "/templates")
     assert_true(status == 200 and "نماذج المراسلات" in templates_html,
                 "templates settings section failed")
-    assert_true('name="unit_id"' in templates_html and 'name="file"' in templates_html
-                and 'name="folder_path"' not in templates_html,
-                "template management should use only name, unit and file")
+    form_start = templates_html.index('action="/settings/templates/upload"')
+    form_end = templates_html.index("</form>", form_start) + len("</form>")
+    template_form = templates_html[form_start:form_end]
+    assert_true('name="unit_id"' in template_form and 'name="file"' in template_form
+                and 'name="folder_path"' not in template_form and 'name="category"' not in template_form
+                and 'name="year"' not in template_form and 'name="storage_place_id"' not in template_form,
+                "template form should expose only name, unit and file")
     template_dir = os.path.join(ROOT, "letter_templates")
     os.makedirs(template_dir, exist_ok=True)
     with open(os.path.join(template_dir, "نموذج QA.docx"), "wb") as tf:
