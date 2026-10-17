@@ -75,13 +75,15 @@ def _close_managed_chrome():
             pass
 
 def _probe_external_connectivity(timeout=0.6):
-    for host,port in [('1.1.1.1',53),('8.8.8.8',53),('9.9.9.9',53)]:
+    # Test public endpoints on common HTTPS and DNS ports. Always close failed sockets.
+    targets=[('1.1.1.1',443),('8.8.8.8',443),('9.9.9.9',443),
+             ('1.1.1.1',53),('8.8.8.8',53),('9.9.9.9',53)]
+    for host,port in targets:
         try:
-            s=socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-            s.settimeout(timeout)
-            s.connect((host,port))
-            s.close()
-            return True
+            with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as sock:
+                sock.settimeout(timeout)
+                sock.connect((host,port))
+                return True
         except Exception:
             continue
     return False
