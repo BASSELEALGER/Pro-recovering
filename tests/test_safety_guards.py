@@ -15,6 +15,8 @@ class SafetyGuardTests(unittest.TestCase):
         self.old_db_file = app.DB_FILE
         self.old_base_dir = app.BASE_DIR
         self.old_static_dir = app.STATIC_DIR
+        self.old_chrome_process = app.CHROME_PROCESS
+        self.old_chrome_profile_dir = getattr(app, "CHROME_PROFILE_DIR", None)
         app.BASE_DIR = self.temp_dir
         app.STATIC_DIR = os.path.join(self.temp_dir, "static")
         os.makedirs(app.STATIC_DIR, exist_ok=True)
@@ -24,6 +26,9 @@ class SafetyGuardTests(unittest.TestCase):
         app.DB_FILE = self.old_db_file
         app.BASE_DIR = self.old_base_dir
         app.STATIC_DIR = self.old_static_dir
+        app.CHROME_PROCESS = self.old_chrome_process
+        if hasattr(app, "CHROME_PROFILE_DIR"):
+            app.CHROME_PROFILE_DIR = self.old_chrome_profile_dir
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
