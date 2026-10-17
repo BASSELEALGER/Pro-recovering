@@ -2525,7 +2525,7 @@ class H(BaseHTTPRequestHandler):
                 records=x.execute("SELECT r.id,r.direction,r.record_number,r.record_year,r.record_date,r.subject,r.unit_id,u.name AS unit_name,s.name AS storage_name FROM records r LEFT JOIN units u ON u.id=r.unit_id LEFT JOIN storage_places s ON s.id=u.storage_place_id ORDER BY r.id").fetchall()
                 def _norm_pdf_name(value):
                     value=normalize_digits(str(value or '')).casefold()
-                    return re.sub(r'[\\s_]+','',value)
+                    return re.sub(r'[\s_]+','',value)
                 candidates=[]
                 existing_links=x.execute('SELECT id,record_id,relative_path FROM attachments').fetchall()
                 skipped_linked=0
