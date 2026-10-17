@@ -2581,7 +2581,7 @@ class H(BaseHTTPRequestHandler):
                 all_number_rows=x.execute("SELECT id,record_number FROM records").fetchall()
                 def _norm_confirm(value):
                     value=normalize_digits(str(value or '')).casefold()
-                    return re.sub(r'[\\s_]+','',value)
+                    return re.sub(r'[\s_]+','',value)
                 created=0; conflicts=0
                 for item in items:
                     if not isinstance(item,dict): continue
